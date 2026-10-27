@@ -3,7 +3,7 @@
 **Status:** Archived / Research Phase
 **Firmware Target:** PS4 12.52
 **Environment:** `remote_lua_loader` (Lua 5.1)
-**Authors:** [Your Name/Handle] & Tulip 🌷
+**Authors:**andlepods
 
 ## 📌 Overview
 
