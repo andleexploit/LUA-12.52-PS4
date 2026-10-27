@@ -5,7 +5,7 @@
 **Environment:** `remote_lua_loader` (Lua 5.1)
 **Authors:** [andre
 
-> 📄 **[READ THE FULL INTERACTIVE REPORT HERE (index.html)](https://TU_USUARIO.github.io/TU_REPO/)** 
+> 📄 **[READ THE FULL INTERACTIVE REPORT HERE (index.html)](https://andleexploit.github.io/LUA-12.52-PS4/)** 
 > *(Replace this link with your actual GitHub Pages URL)*
 
 ---
